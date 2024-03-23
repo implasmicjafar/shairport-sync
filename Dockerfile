@@ -1,4 +1,7 @@
-FROM alpine:3.17 AS builder
+FROM crazymax/alpine-s6:3.17-3.1.1.2
+
+ENV S6_CMD_WAIT_FOR_SERVICES=1
+ENV S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0
 
 # Check required arguments exist. These will be provided by the Github Action
 # Workflow and are required to ensure the correct branches are being used.
@@ -12,6 +15,9 @@ RUN apk -U add \
         autoconf \
         automake \
         avahi-dev \
+        avahi-tools \
+        glib \
+        less \
         build-base \
         dbus \
         ffmpeg-dev \
@@ -66,15 +72,17 @@ WORKDIR /
 ##### SPS END #####
 
 RUN ln -s build/install/usr/local/bin/shairport-sync /usr/local/bin/shairport-sync
-RUN ln -s /shairport-sync/build/install/usr/local/share/man/man7 /usr/share/man/man7
+RUN mkdir -p /usr/share/man/man7
+RUN cp -R /shairport-sync/build/install/usr/local/share/man/man7/. /usr/share/man/man7
 RUN ln -s /nqptp/nqptp /usr/local/bin/nqptp
 RUN ln -s /shairport-sync/build/install/etc/shairport-sync.conf /etc/shairport-sync.conf
 RUN ln -s /shairport-sync/build/install/etc/shairport-sync.conf.sample /etc/shairport-sync.conf.sample
-RUN mkdir /etc/dbus-1/system.d
-RUN ln -s /shairport-sync/build/install/etc/dbus-1/system.d/shairport-sync-dbus.conf /etc/dbus-1/system.d/shairport-sync-dbus.conf
-RUN ln -s /shairport-sync/build/install/etc/dbus-1/system.d/shairport-sync-mpris.conf /etc/dbus-1/system.d/shairport-sync-mpris.conf
+RUN mkdir -p /etc/dbus-1/system.d
+RUN cp /shairport-sync/build/install/etc/dbus-1/system.d/shairport-sync-dbus.conf /etc/dbus-1/system.d/shairport-sync-dbus.conf
+RUN cp /shairport-sync/build/install/etc/dbus-1/system.d/shairport-sync-mpris.conf /etc/dbus-1/system.d/shairport-sync-mpris.conf
 
-RUN ln -s /shairport-sync/docker/etc/s6-overlay /etc/s6-overlay
+RUN mkdir -p /etc/s6-overlay
+RUN cp -R /shairport-sync/docker/etc/s6-overlay/. /etc/s6-overlay
 RUN cp -R /shairport-sync/docker/etc/pulse/. /etc/pulse
 RUN chmod +x /etc/s6-overlay/s6-rc.d/01-startup/script.sh
 
@@ -84,4 +92,8 @@ RUN adduser -D shairport-sync -G shairport-sync
 RUN addgroup -g 29 docker_audio && addgroup shairport-sync docker_audio && addgroup shairport-sync audio
 
 RUN ln -s /shairport-sync/docker/run.sh /run.sh
+RUN ln -s /shairport-sync/runstart.sh /runstart.sh
 RUN chmod +x /run.sh
+RUN chmod +x /runstart.sh
+
+Entrypoint ["/init","./runstart.sh"]
