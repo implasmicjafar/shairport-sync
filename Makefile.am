@@ -77,7 +77,7 @@ shairport_sync_SOURCES += mdns_external.c
 endif
 
 if USE_ALSA
-shairport_sync_SOURCES += audio_alsa.c
+shairport_sync_SOURCES += audio_alsa.c audio_multi_alsa.c
 endif
 
 if USE_JACK

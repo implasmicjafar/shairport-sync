@@ -27,35 +27,14 @@
 
 #define ALSA_PCM_NEW_HW_PARAMS_API
 
-#include <alsa/asoundlib.h>
-#include <inttypes.h>
-#include <math.h>
-#include <memory.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <unistd.h>
-
-#include "config.h"
-
-#include "activity_monitor.h"
-#include "audio.h"
-#include "common.h"
-
-enum alsa_backend_mode {
-  abm_disconnected,
-  abm_connected,
-  abm_playing
-} alsa_backend_state; // under the control of alsa_mutex
-
-typedef struct {
-  snd_pcm_format_t alsa_code;
-  int frame_size;
-} format_record;
+#include "audio_alsa.h"
 
 int output_method_signalled = 0; // for reporting whether it's using mmap or not
 int delay_type_notified = -1; // for controlling the reporting of whether the output device can do
                               // precision delays (e.g. alsa->pulsaudio virtual devices can't)
 int use_monotonic_clock = 0;  // this value will be set when the hardware is initialised
+
+static alsa_backend_mode alsa_backend_state;
 
 static void help(void);
 static int init(int argc, char **argv);
@@ -364,6 +343,8 @@ unsigned int auto_speed_output_rates[] = {
     352800,
 };
 
+const int number_speeds = sizeof(auto_speed_output_rates) / sizeof(unsigned int);
+
 // This array is of all the formats known to Shairport Sync, in order of the SPS_FORMAT definitions,
 // with their equivalent alsa codes and their frame sizes.
 // If just one format is requested, then its entry is searched for in the array and checked on the
@@ -400,6 +381,8 @@ sps_format_t auto_format_check_sequence[] = {
     SPS_FORMAT_S24_BE, SPS_FORMAT_S24_3LE, SPS_FORMAT_S24_3BE, SPS_FORMAT_S16, SPS_FORMAT_S16_LE,
     SPS_FORMAT_S16_BE, SPS_FORMAT_S8,      SPS_FORMAT_U8,
 };
+
+const int number_sps_format_t = sizeof(auto_format_check_sequence) / sizeof(sps_format_t);
 
 // assuming pthread cancellation is disabled
 // if do_auto_setting is true and auto format or auto speed has been requested,

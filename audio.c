@@ -51,6 +51,7 @@ extern audio_output audio_pa;
 #endif
 #ifdef CONFIG_ALSA
 extern audio_output audio_alsa;
+extern audio_output audio_multi_alsa;
 #endif
 #ifdef CONFIG_DUMMY
 extern audio_output audio_dummy;
@@ -65,6 +66,7 @@ extern audio_output audio_stdout;
 static audio_output *outputs[] = {
 #ifdef CONFIG_ALSA
     &audio_alsa,
+    &audio_multi_alsa,
 #endif
 #ifdef CONFIG_SNDIO
     &audio_sndio,

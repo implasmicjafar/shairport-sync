@@ -71,7 +71,7 @@ RUN DESTDIR=install make install
 WORKDIR /
 ##### SPS END #####
 
-RUN ln -s build/install/usr/local/bin/shairport-sync /usr/local/bin/shairport-sync
+RUN ln -s /shairport-sync/build/install/usr/local/bin/shairport-sync /usr/local/bin/shairport-sync
 RUN mkdir -p /usr/share/man/man7
 RUN cp -R /shairport-sync/build/install/usr/local/share/man/man7/. /usr/share/man/man7
 RUN ln -s /nqptp/nqptp /usr/local/bin/nqptp
