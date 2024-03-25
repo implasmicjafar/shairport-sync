@@ -190,21 +190,9 @@ struct alsa_output_
     int set_period_size_request;
     int set_buffer_size_request;
     snd_pcm_uframes_t period_size_requested, buffer_size_requested;
-    /*
-    int no_sync;
-    int alsa_use_hardware_mute;
-    int output_format_auto_requested;
-    int output_rate_auto_requested;
-    unsigned int output_rate;
-    int no_mmap;
-    double disable_standby_mode_silence_threshold;
-    double disable_standby_mode_silence_scan_interval;
-    disable_standby_mode_type disable_standby_mode;
-    sps_format_t output_format;
-    double alsa_maximum_stall_time;
-    volatile int keep_dac_busy;
+    
     yna_type use_precision_timing;
-    */
+    
     double set_volume;
 
     // set to true if there has been a discontinuity between the last reported frames_sent_for_playing
@@ -372,9 +360,7 @@ static void initialize_alsa_output(alsa_output *output)
     output->set_period_size_request = 0;
     output->set_buffer_size_request = 0;
 
-    // output->use_precision_timing = YNA_AUTO;
-    // output->keep_dac_busy = 0;
-    // output->disable_standby_mode = disable_standby_off;
+    output->use_precision_timing = config.use_precision_timing;
 }
 
 // Static Methods Implementations //
@@ -864,11 +850,11 @@ static int actual_open_alsa_device(alsa_output *output, int do_auto_setup)
               actual_buffer_length, config.audio_backend_buffer_desired_length);
     }
 
-    if (config.use_precision_timing == YNA_YES)
+    if (output->use_precision_timing == YNA_YES)
     {
         output->delay_and_status = precision_delay_and_status;
     }
-    else if (config.use_precision_timing == YNA_AUTO)
+    else if (output->use_precision_timing == YNA_AUTO)
     {
         if (precision_delay_available(output))
         {
@@ -1787,6 +1773,7 @@ static int init(int argc, char **argv)
         int idx;
         for (idx = 0; idx < alsa_outputs_g.output_count; idx++)
         {
+            alsa_outputs_g.outputs[idx].use_precision_timing = config.use_precision_timing;
             pthread_create(&alsa_outputs_g.outputs[idx].alsa_buffer_monitor_thread, NULL, &alsa_buffer_monitor_thread_code, &alsa_outputs_g.outputs[idx]);
         }
     }
