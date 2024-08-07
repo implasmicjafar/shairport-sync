@@ -1,11 +1,11 @@
-shairport-sync.7: shairport-sync.7.xml
-	xmltoman shairport-sync.7.xml > shairport-sync.7
+all: shairport-sync.1 shairport-sync.html
 
-shairport-sync.html: shairport-sync.7.xml
-	xsltproc xmltoman.xsl shairport-sync.7.xml > shairport-sync.html
+%.1: %.1.xml
+	xmltoman $*.1.xml > $*.tmp && mv $*.tmp $*.1
 
-all: shairport-sync.7 shairport-sync.html
+%.html: %.1.xml
+	xsltproc xmltoman.xsl $*.1.xml > $*.tmp && mv $*.tmp $*.html
 
 clean:
-	rm shairport-sync.7
+	rm shairport-sync.1
 	rm shairport-sync.html

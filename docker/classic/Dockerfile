@@ -40,7 +40,7 @@ COPY . .
 RUN git checkout "$SHAIRPORT_SYNC_BRANCH"
 WORKDIR /shairport-sync/build
 RUN autoreconf -i ../
-RUN ../configure --sysconfdir=/etc --with-alsa --with-pa --with-soxr --with-avahi --with-ssl=mbedtls \
+RUN CFLAGS="-O3" CXXFLAGS="-O3" ../configure --sysconfdir=/etc --with-alsa --with-pa --with-soxr --with-avahi --with-ssl=mbedtls \
         --with-metadata --with-dummy --with-pipe --with-dbus-interface \
         --with-stdout --with-mpris-interface --with-mqtt-client \
         --with-apple-alac --with-convolution
@@ -75,7 +75,7 @@ RUN apk -U add \
 
 # Copy build files.
 COPY --from=builder /shairport-sync/build/install/usr/local/bin/shairport-sync /usr/local/bin/shairport-sync
-COPY --from=builder /shairport-sync/build/install/usr/local/share/man/man7 /usr/share/man/man7
+COPY --from=builder /shairport-sync/build/install/usr/local/share/man/man1 /usr/share/man/man1
 COPY --from=builder /usr/local/lib/libalac.* /usr/local/lib/
 COPY --from=builder /shairport-sync/build/install/etc/shairport-sync.conf /etc/
 COPY --from=builder /shairport-sync/build/install/etc/shairport-sync.conf.sample /etc/

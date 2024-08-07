@@ -25,6 +25,8 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -35,9 +37,7 @@
 #include <popt.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -291,7 +291,7 @@ void usage(char *progname) {
     printf("    -c, --configfile=FILE   Read configuration settings from FILE. Default is %s.\n", configuration_file_path);
     printf("    -a, --name=NAME         Set service name. Default is the hostname with first letter capitalised.\n");
     printf("    --password=PASSWORD     Require PASSWORD to connect. Default is no password. (Classic AirPlay only.)\n");
-    printf("    -p, --port=PORT         Set RTSP listening port. Default 5000; 7000 for AirPlay 2./\n");
+    printf("    -p, --port=PORT         Set RTSP listening port. Default 5000; 7000 for AirPlay 2.\n");
     printf("    -L, --latency=FRAMES    [Deprecated] Set the latency for audio sent from an unknown device.\n");
     printf("                            The default is to set it automatically.\n");
     printf("    -S, --stuffing=MODE     Set how to adjust current latency to match desired latency, where:\n");
@@ -1207,8 +1207,8 @@ int parse_options(int argc, char **argv) {
 
     } else {
       if (config_error_type(&config_file_stuff) == CONFIG_ERR_FILE_IO)
-        debug(2, "Error reading configuration file \"%s\": \"%s\".",
-              config_error_file(&config_file_stuff), config_error_text(&config_file_stuff));
+        die("Error reading configuration file \"%s\": \"%s\".", config_file_real_path,
+            config_error_text(&config_file_stuff));
       else {
         die("Line %d of the configuration file \"%s\":\n%s", config_error_line(&config_file_stuff),
             config_error_file(&config_file_stuff), config_error_text(&config_file_stuff));
@@ -1570,12 +1570,16 @@ const char *pid_file_proc(void) {
 #endif
 
 void exit_rtsp_listener() {
-  pthread_cancel(rtsp_listener_thread);
-  pthread_join(rtsp_listener_thread, NULL); // not sure you need this
+  debug(3, "exit_rtsp_listener begins");
+  if (type_of_exit_cleanup != TOE_emergency) {
+    pthread_cancel(rtsp_listener_thread);
+    pthread_join(rtsp_listener_thread, NULL); // not sure you need this
+  }
+  debug(3, "exit_rtsp_listener ends");
 }
 
 void exit_function() {
-
+  debug(3, "exit_function begins");
   if (type_of_exit_cleanup != TOE_emergency) {
     // the following is to ensure that if libdaemon has been included
     // that most of this code will be skipped when the parent process is exiting
@@ -1929,6 +1933,12 @@ void _display_config(const char *filename, const int linenumber, __attribute__((
 #define display_config(argc, argv) _display_config(__FILE__, __LINE__, argc, argv)
 
 int main(int argc, char **argv) {
+#ifdef COMPILE_FOR_OPENBSD
+  /* Start with the superset of all potentially required promises. */
+  if (pledge("stdio rpath wpath cpath dpath inet unix dns proc exec audio", NULL) == -1)
+    die("pledge: %s", strerror(errno));
+#endif
+
   memset(&config, 0, sizeof(config)); // also clears all strings, BTW
   /* Check if we are called with -V or --version parameter */
   if (argc >= 2 && ((strcmp(argv[1], "-V") == 0) || (strcmp(argv[1], "--version") == 0))) {
@@ -2033,8 +2043,8 @@ int main(int argc, char **argv) {
   config.debugger_show_file_and_line =
       1; // by default, log the file and line of the originating message
   config.debugger_show_relative_time =
-      1;                // by default, log the  time back to the previous debug message
-  config.timeout = 120; // this number of seconds to wait for [more] audio before switching to idle.
+      1;                // by default, log the time back to the previous debug message
+  config.timeout = 120; // wait this number of seconds to wait for a dropped RTSP connection to come back before declaring it lost.
   config.buffer_start_fill = 220;
 
   config.resync_threshold = 0.050;   // default
@@ -2042,7 +2052,6 @@ int main(int argc, char **argv) {
   config.tolerance = 0.002;
 
 #ifdef CONFIG_AIRPLAY_2
-  config.timeout = 0; // disable watchdog
   config.port = 7000;
 #else
   config.port = 5000;
@@ -2101,6 +2110,13 @@ int main(int argc, char **argv) {
 #endif
   // parse arguments into config -- needed to locate pid_dir
   int audio_arg = parse_options(argc, argv);
+
+#ifdef COMPILE_FOR_OPENBSD
+  /* Any command to be executed at runtime? */
+  int run_cmds = config.cmd_active_start != NULL || config.cmd_active_stop != NULL ||
+                 config.cmd_set_volume != NULL || config.cmd_start != NULL ||
+                 config.cmd_stop != NULL;
+#endif
 
   // mDNS supports maximum of 63-character names (we append 13).
   if (strlen(config.service_name) > 50) {
@@ -2237,6 +2253,16 @@ int main(int argc, char **argv) {
 
 #endif
 
+#ifdef COMPILE_FOR_OPENBSD
+  /* Past daemon(3)'s double fork(2). */
+
+  /* Only user-defined commands are executed. */
+  if (!run_cmds)
+    /* Drop "proc exec". */
+    if (pledge("stdio rpath wpath cpath dpath inet unix dns audio", NULL) == -1)
+      die("pledge: %s", strerror(errno));
+#endif
+
 #ifdef CONFIG_AIRPLAY_2
 
   if (has_fltp_capable_aac_decoder() == 0) {
@@ -2352,6 +2378,26 @@ int main(int argc, char **argv) {
   }
   config.output->init(argc - audio_arg, argv + audio_arg);
 
+#ifdef COMPILE_FOR_OPENBSD
+  /* Past first and last sio_open(3), sndio(7) only needs "audio". */
+
+#ifdef CONFIG_METADATA
+  /* Only coverart cache is created.
+   * Only metadata pipe is special. */
+  if (!config.metadata_enabled)
+#endif
+  {
+    /* Drop "cpath dpath". */
+    if (run_cmds) {
+      if (pledge("stdio rpath wpath inet unix dns proc exec audio", NULL) == -1)
+        die("pledge: %s", strerror(errno));
+    } else {
+      if (pledge("stdio rpath wpath inet unix dns audio", NULL) == -1)
+        die("pledge: %s", strerror(errno));
+    }
+  }
+#endif
+
   // pthread_cleanup_push(main_cleanup_handler, NULL);
 
   // daemon_log(LOG_NOTICE, "startup");
@@ -2429,7 +2475,7 @@ int main(int argc, char **argv) {
   debug(1, "allow a session to be interrupted: %d.", config.allow_session_interruption);
   debug(1, "busy timeout time is %d.", config.timeout);
   debug(1, "drift tolerance is %f seconds.", config.tolerance);
-  debug(1, "password is \"%s\".", strnull(config.password));
+  debug(1, "password is %s.", config.password == NULL ? "not set" : "set (omitted)");
   debug(1, "default airplay volume is: %.6f.", config.default_airplay_volume);
   debug(1, "high threshold airplay volume is: %.6f.", config.high_threshold_airplay_volume);
   if (config.limit_to_high_volume_threshold_time_in_minutes == 0)
@@ -2491,7 +2537,7 @@ int main(int argc, char **argv) {
 #ifdef CONFIG_METADATA
   debug(1, "metadata enabled is %d.", config.metadata_enabled);
   debug(1, "metadata pipename is \"%s\".", config.metadata_pipename);
-  debug(1, "metadata socket address is \"%s\" port %d.", config.metadata_sockaddr,
+  debug(1, "metadata socket address is \"%s\" port %d.", strnull(config.metadata_sockaddr),
         config.metadata_sockport);
   debug(1, "metadata socket packet size is \"%d\".", config.metadata_sockmsglength);
   debug(1, "get-coverart is %d.", config.get_coverart);

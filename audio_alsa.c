@@ -1,7 +1,7 @@
 /*
  * libalsa output driver. This file is part of Shairport.
  * Copyright (c) Muffinman, Skaman 2013
- * Copyright (c) Mike Brady 2014 -- 2022
+ * Copyright (c) Mike Brady 2014 -- 2024
  * All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person
@@ -125,6 +125,7 @@ long alsa_mix_minv, alsa_mix_maxv;
 long alsa_mix_mindb, alsa_mix_maxdb;
 
 char *alsa_out_dev = "default";
+char *hw_alsa_out_dev = NULL;
 char *alsa_mix_dev = NULL;
 char *alsa_mix_ctrl = NULL;
 int alsa_mix_index = 0;
@@ -258,19 +259,78 @@ uint64_t frames_sent_for_playing;
 // frames_sent_for_playing (which Shairport Sync might hold) would be invalid.
 int frames_sent_break_occurred;
 
+// if a device name ends in ",DEV=0", drop it. Then if it also begins with "CARD=", drop that too.
+static void simplify_and_printf_mutable_device_name(char *device_name) {
+  if (strstr(device_name, ",DEV=0") == device_name + strlen(device_name) - strlen(",DEV=0")) {
+    char *shortened_device_name = str_replace(device_name, ",DEV=0", "");
+    char *simplified_device_name = str_replace(shortened_device_name, "CARD=", "");
+    printf("      \"%s\"\n", simplified_device_name);
+    free(simplified_device_name);
+    free(shortened_device_name);
+  } else {
+    printf("      \"%s\"\n", device_name);
+  }
+}
+
 static void help(void) {
+
   printf("    -d output-device    set the output device, default is \"default\".\n"
          "    -c mixer-control    set the mixer control name, default is to use no mixer.\n"
          "    -m mixer-device     set the mixer device, default is the output device.\n"
          "    -i mixer-index      set the mixer index, default is 0.\n");
-  int r = system("if [ -d /proc/asound ] ; then echo \"    hardware output devices:\" ; ls -al "
-                 "/proc/asound/ 2>/dev/null | grep '\\->' | tr -s ' ' | cut -d ' ' -f 9 | while "
-                 "read line; do echo \"      \\\"hw:$line\\\"\" ; done ; fi");
-  if (r != 0)
-    debug(2, "error %d executing a script to list alsa hardware device names", r);
+  // look for devices with a name prefix of hw: or hdmi:
+  int card_number = -1;
+  snd_card_next(&card_number);
+
+  if (card_number < 0) {
+    printf("      no hardware output devices found.\n");
+  }
+
+  int at_least_one_device_found = 0;
+  while (card_number >= 0) {
+    void **hints;
+    char *hdmi_str = NULL;
+    char *hw_str = NULL;
+    if (snd_device_name_hint(card_number, "pcm", &hints) == 0) {
+      void **device_on_card_hints = hints;
+      while (*device_on_card_hints != NULL) {
+        char *device_on_card_name = snd_device_name_get_hint(*device_on_card_hints, "NAME");
+        if ((strstr(device_on_card_name, "hw:") == device_on_card_name) && (hw_str == NULL))
+          hw_str = strdup(device_on_card_name);
+        if ((strstr(device_on_card_name, "hdmi:") == device_on_card_name) && (hdmi_str == NULL))
+          hdmi_str = strdup(device_on_card_name);
+        free(device_on_card_name);
+        device_on_card_hints++;
+      }
+      snd_device_name_free_hint(hints);
+      if ((hdmi_str != NULL) || (hw_str != NULL)) {
+        if (at_least_one_device_found == 0) {
+          printf("    hardware output devices:\n");
+          at_least_one_device_found = 1;
+        }
+      }
+      if (hdmi_str != NULL) {
+        simplify_and_printf_mutable_device_name(hdmi_str);
+      } else if (hw_str != NULL) {
+        simplify_and_printf_mutable_device_name(hw_str);
+      }
+      if (hdmi_str != NULL)
+        free(hdmi_str);
+      if (hw_str != NULL)
+        free(hw_str);
+    }
+    snd_card_next(&card_number);
+  }
+  if (at_least_one_device_found == 0)
+    printf("    no hardware output devices found.\n");
 }
 
-void set_alsa_out_dev(char *dev) { alsa_out_dev = dev; } // ugh -- not static!
+void set_alsa_out_dev(char *dev) {
+  alsa_out_dev = dev;
+  if (hw_alsa_out_dev != NULL)
+    free(hw_alsa_out_dev);
+  hw_alsa_out_dev = str_replace(alsa_out_dev, "hdmi:", "hw:");
+} // ugh -- not static!
 
 // assuming pthread cancellation is disabled
 // returns zero of all is okay, a Unx error code if there's a problem
@@ -885,7 +945,7 @@ static int prepare_mixer() {
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldState); // make this un-cancellable
 
     if (alsa_mix_dev == NULL)
-      alsa_mix_dev = alsa_out_dev;
+      alsa_mix_dev = hw_alsa_out_dev;
 
     // Now, start trying to initialise the alsa device with the settings
     // obtained
@@ -921,9 +981,9 @@ static int prepare_mixer() {
         } else {
           // use the linear scale and do the db conversion ourselves
           warn("The hardware mixer specified -- \"%s\" -- does not have "
-               "a dB volume scale.",
+               "a dB volume scale, and so can not be used by Shairport Sync.",
                alsa_mix_ctrl);
-
+          /*
           if ((response = snd_ctl_open(&ctl, alsa_mix_dev, 0)) < 0) {
             warn("Cannot open control \"%s\"", alsa_mix_dev);
           }
@@ -944,9 +1004,10 @@ static int prepare_mixer() {
                                                    // we know it can do dB stuff
               audio_alsa.parameters = &parameters; // likewise the parameters stuff
             } else {
-              debug(1, "Cannot get the dB range from the volume control \"%s\"", alsa_mix_ctrl);
+              debug(1, "Cannot get a dB range from the volume control \"%s\"", alsa_mix_ctrl);
             }
           }
+          */
         }
       }
       if (((config.alsa_use_hardware_mute == 1) &&
@@ -1337,11 +1398,19 @@ static int init(int argc, char **argv) {
   }
 
   debug(1, "alsa: output device name is \"%s\".", alsa_out_dev);
-
+  
+  
+  // now, we need a version of the alsa_out_dev that substitutes "hw:" for "hdmi" if it's
+  // there. It seems hw:1 would be a valid devcie name where hdmi:1 would not
+  
+  if (alsa_out_dev != NULL)
+    hw_alsa_out_dev = str_replace(alsa_out_dev, "hdmi:", "hw:");
+  
   // so, now, if the option to keep the DAC running has been selected, start a
   // thread to monitor the
   // length of the queue
   // if the queue gets too short, stuff it with silence
+  
 
   pthread_create(&alsa_buffer_monitor_thread, NULL, &alsa_buffer_monitor_thread_code, NULL);
 
@@ -1358,6 +1427,8 @@ static void deinit(void) {
   debug(3, "Join buffer monitor thread.");
   pthread_join(alsa_buffer_monitor_thread, NULL);
   pthread_setcancelstate(oldState, NULL);
+  if (hw_alsa_out_dev != NULL)
+    free(hw_alsa_out_dev);
 }
 
 static int set_mute_state() {

@@ -1,6 +1,6 @@
 ARFLAGS = cr
 
-man_MANS = $(top_srcdir)/man/shairport-sync.7
+man_MANS = $(top_srcdir)/man/shairport-sync.1
 
 lib_pair_ap_a_CFLAGS = -Wall -g -DCONFIG_GCRYPT -pthread
 lib_tinyhttp_a_CFLAGS = -pthread
@@ -34,6 +34,7 @@ if BUILD_FOR_OPENBSD
 else
   AM_CXXFLAGS = -fno-common -Wno-multichar -Wall -Wextra -Wno-clobbered -Wno-psabi -pthread -DSYSCONFDIR=\"$(sysconfdir)\"
   AM_CFLAGS = -fno-common -Wno-multichar -Wall -Wextra -Wno-clobbered -Wno-psabi -pthread -DSYSCONFDIR=\"$(sysconfdir)\"
+  shairport_sync_SOURCES += scripts/shairport-sync.service scripts/shairport-sync.service-avahi scripts/shairport-sync
 endif
 endif
 endif
@@ -211,8 +212,6 @@ shairport_sync_mpris_test_client_SOURCES = shairport-sync-mpris-test-client.c
 shairport_sync_mpris_test_client_LDADD = lib_mpris_interface.a
 endif
 
-if INSTALL_CONFIG_FILES
-
 CONFIG_FILE_INSTALL_TARGET = config-file-install-local
 $(CONFIG_FILE_INSTALL_TARGET): scripts/shairport-sync.conf
 	install -d $(DESTDIR)$(sysconfdir)
@@ -257,14 +256,16 @@ $(MPRIS_POLICY_INSTALL_TARGET): $(MPRIS_POLICY_FILE)
 
 endif # USE_MPRIS
 
-endif # INSTALL_CONFIG_FILES
-
 INSTALL_GROUP_TARGET = install-group-local
 
 $(INSTALL_GROUP_TARGET):
 	getent group shairport-sync &>/dev/null || groupadd -r shairport-sync &>/dev/null
 
+if INSTALL_CREATE_USER_GROUP
 INSTALL_USER_TARGET = install-user-local
+else
+INSTALL_USER_TARGET =
+endif
 
 $(INSTALL_USER_TARGET): $(INSTALL_GROUP_TARGET)
 	getent passwd shairport-sync &>/dev/null || useradd -r -M -g shairport-sync -s /usr/sbin/nologin -G audio shairport-sync &>/dev/null
@@ -329,10 +330,16 @@ $(INSTALL_CYGWIN_TARGET): scripts/shairport-sync-config
 
 endif # INSTALL_CYGWIN_SERVICE
 
-install-exec-hook: $(CONFIG_FILE_INSTALL_TARGET) \
+install-config-files: $(CONFIG_FILE_INSTALL_TARGET) \
                    $(DBUS_POLICY_INSTALL_TARGET) \
                    $(MPRIS_POLICY_INSTALL_TARGET) \
                    $(INSTALL_SYSTEMV_TARGET) \
                    $(INSTALL_SYSTEMD_TARGET) \
                    $(INSTALL_FREEBSD_TARGET) \
                    $(INSTALL_CYGWIN_TARGET)
+
+if INSTALL_CONFIG_FILES
+
+install-exec-hook: install-config-files
+
+endif
